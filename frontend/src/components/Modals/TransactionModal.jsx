@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
-import { X, DollarSign } from 'lucide-react';
-import { INCOME_CATEGORIES, EXPENSE_CATEGORIES, toInputDate } from '../../utils/helpers';
+import { useState, useEffect, useRef } from 'react';
+import { X, Banknote, Wand2, Camera } from 'lucide-react';
+import { INCOME_CATEGORIES, EXPENSE_CATEGORIES, toInputDate, compressImage } from '../../utils/helpers';
+import { aiAPI } from '../../services/api';
+import { useTransactions } from '../../context/TransactionContext';
 import toast from 'react-hot-toast';
 
 const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
@@ -12,10 +14,15 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
     description: '',
     date: toInputDate(new Date()),
   });
+  const [aiText, setAiText] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const fileInputRef = useRef(null);
+  
+  const { scanReceipt } = useTransactions();
 
-  // Pre-fill form when editing
   useEffect(() => {
     if (editData) {
       setType(editData.type);
@@ -29,6 +36,7 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
       setType('expense');
       setForm({ amount: '', category: '', description: '', date: toInputDate(new Date()) });
     }
+    setAiText('');
     setErrors({});
   }, [editData, isOpen]);
 
@@ -44,16 +52,65 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
     return Object.keys(errs).length === 0;
   };
 
+  const handleAiParse = async () => {
+    if (!aiText.trim()) return;
+    setAiLoading(true);
+    try {
+      const { data } = await aiAPI.parseExpense({ text: aiText });
+      if (data.success && data.data) {
+        const parsedType = data.data.type === 'income' ? 'income' : 'expense';
+        setType(parsedType);
+        setForm({
+          amount: data.data.amount ? String(data.data.amount) : form.amount,
+          category: data.data.category || form.category,
+          description: data.data.description || form.description,
+          date: data.data.date ? toInputDate(new Date(data.data.date)) : form.date,
+        });
+        toast.success('Auto-filled from text!');
+        setAiText('');
+      }
+    } catch (err) {
+      toast.error('AI parsing failed. Try manually entering.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleScanReceipt = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanLoading(true);
+    try {
+      toast.loading('Compressing & Scanning...', { id: 'scan-toast' });
+      const compressedFile = await compressImage(file, 800); // compress to max 800px width
+      const data = await scanReceipt(compressedFile);
+      if (data) {
+        setType('expense'); // Receipts are generally expenses
+        setForm({
+          amount: data.amount ? String(data.amount) : form.amount,
+          category: data.category || form.category,
+          description: data.description || form.description,
+          date: data.date ? toInputDate(new Date(data.date)) : form.date,
+        });
+        toast.success('Receipt scanned!', { id: 'scan-toast' });
+      }
+    } catch (err) {
+      toast.error('Scan took too long or failed. Try again.', { id: 'scan-toast' });
+    } finally {
+      setScanLoading(false);
+      e.target.value = ''; // Reset input
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
     setLoading(true);
     try {
       await onSubmit({ ...form, type, amount: parseFloat(form.amount) });
-      toast.success(isEdit ? 'Transaction updated!' : `${type === 'income' ? 'Income' : 'Expense'} added!`);
       onClose();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Something went wrong');
+      // Error handled in context or parent usually, but just in case
     } finally {
       setLoading(false);
     }
@@ -63,7 +120,6 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: '' }));
-    // Reset category when type changes
     if (name === 'type') setForm((prev) => ({ ...prev, category: '' }));
   };
 
@@ -71,12 +127,11 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
 
   return (
     <div
-      className="modal-backdrop fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
+      className="modal-backdrop fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 overflow-y-auto"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="modal-panel bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+      <div className="modal-panel bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl my-8 flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
             {isEdit ? 'Edit Transaction' : 'Add Transaction'}
           </h2>
@@ -88,8 +143,58 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Type toggle */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto">
+          {!isEdit && (
+            <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800/30 flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 mb-2">
+                  <Wand2 size={14} /> AI Auto-fill Expense
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={aiText}
+                    onChange={(e) => setAiText(e.target.value)}
+                    placeholder="e.g. Spent 1200 on grocery today"
+                    className="input flex-1 text-sm bg-white dark:bg-slate-800"
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAiParse())}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAiParse}
+                    disabled={aiLoading || !aiText.trim()}
+                    className="px-3 py-2 bg-indigo-600 text-white rounded-lg font-medium text-sm disabled:opacity-50"
+                  >
+                    {aiLoading ? '...' : 'Parse'}
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="h-px bg-indigo-100 dark:bg-indigo-800/50 flex-1" />
+                <span className="text-xs text-indigo-400 font-medium uppercase">OR</span>
+                <div className="h-px bg-indigo-100 dark:bg-indigo-800/50 flex-1" />
+              </div>
+              
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                ref={fileInputRef} 
+                onChange={handleScanReceipt}
+              />
+              <button 
+                type="button" 
+                disabled={scanLoading}
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 py-2 border border-indigo-200 dark:border-indigo-700 rounded-lg text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 transition-colors disabled:opacity-50"
+              >
+                <Camera size={16} />
+                {scanLoading ? 'Scanning...' : 'Scan Receipt Image'}
+              </button>
+            </div>
+          )}
+
           {!isEdit && (
             <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1">
               {['income', 'expense'].map((t) => (
@@ -105,18 +210,17 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
                       : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
                   }`}
                 >
-                  {t === 'income' ? '+ Income' : '− Expense'}
+                  {t === 'income' ? '+ Income' : '- Expense'}
                 </button>
               ))}
             </div>
           )}
 
-          {/* Amount */}
           <div>
             <label className="label">Amount</label>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
-                <DollarSign size={15} />
+                <Banknote size={15} />
               </span>
               <input
                 type="number"
@@ -132,7 +236,6 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
             {errors.amount && <p className="text-red-500 text-xs mt-1">{errors.amount}</p>}
           </div>
 
-          {/* Category */}
           <div>
             <label className="label">Category</label>
             <select
@@ -149,7 +252,6 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
             {errors.category && <p className="text-red-500 text-xs mt-1">{errors.category}</p>}
           </div>
 
-          {/* Description */}
           <div>
             <label className="label">Description <span className="text-slate-400 font-normal">(optional)</span></label>
             <input
@@ -157,13 +259,12 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
               name="description"
               value={form.description}
               onChange={handleChange}
-              placeholder="e.g. Grocery shopping, Netflix subscription…"
+              placeholder="e.g. Grocery shopping..."
               className="input"
               maxLength={200}
             />
           </div>
 
-          {/* Date */}
           <div>
             <label className="label">Date</label>
             <input
@@ -176,7 +277,6 @@ const TransactionModal = ({ isOpen, onClose, onSubmit, editData = null }) => {
             {errors.date && <p className="text-red-500 text-xs mt-1">{errors.date}</p>}
           </div>
 
-          {/* Actions */}
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">
               Cancel

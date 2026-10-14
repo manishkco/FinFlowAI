@@ -1,11 +1,13 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const prisma = require('../config/prisma');
 
 const protect = async (req, res, next) => {
   let token;
 
-  // Get token from Authorization header
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+  // Get token from cookie or Authorization header
+  if (req.cookies && req.cookies.token) {
+    token = req.cookies.token;
+  } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     token = req.headers.authorization.split(' ')[1];
   }
 
@@ -17,11 +19,8 @@ const protect = async (req, res, next) => {
   }
 
   try {
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // Get user from token
-    req.user = await User.findById(decoded.id);
+    req.user = await prisma.user.findUnique({ where: { id: decoded.id } });
 
     if (!req.user) {
       return res.status(401).json({

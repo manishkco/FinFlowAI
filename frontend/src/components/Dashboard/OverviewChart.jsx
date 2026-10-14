@@ -2,7 +2,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-import { formatCurrency } from '../../utils/helpers';
+import { formatCurrency, formatCurrencyShort } from '../../utils/helpers';
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -74,7 +74,7 @@ const OverviewChart = ({ data, loading }) => {
             tick={{ fontSize: 11, fill: '#94a3b8' }}
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v) => `$${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`}
+            tickFormatter={(v) => formatCurrencyShort(v)}
             width={45}
           />
           <Tooltip content={<CustomTooltip />} />

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
-const User = require('../models/User');
+const prisma = require('../config/prisma');
+const bcrypt = require('bcryptjs');
 
 // Generate JWT Token
 const generateToken = (userId) => {
@@ -9,9 +10,9 @@ const generateToken = (userId) => {
   });
 };
 
-// Format user response (never expose password)
+// Format user response
 const formatUser = (user) => ({
-  _id: user._id,
+  _id: user.id, // Keep _id for frontend compatibility
   name: user.name,
   email: user.email,
   currency: user.currency,
@@ -19,9 +20,6 @@ const formatUser = (user) => ({
   createdAt: user.createdAt,
 });
 
-// @route   POST /api/auth/signup
-// @desc    Register new user
-// @access  Public
 const signup = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -31,8 +29,7 @@ const signup = async (req, res) => {
   const { name, email, password } = req.body;
 
   try {
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -40,14 +37,25 @@ const signup = async (req, res) => {
       });
     }
 
-    // Create user
-    const user = await User.create({ name, email, password });
-    const token = generateToken(user._id);
+    const salt = await bcrypt.genSalt(12);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const user = await prisma.user.create({
+      data: { name, email, password: hashedPassword },
+    });
+
+    const token = generateToken(user.id);
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
 
     res.status(201).json({
       success: true,
       message: 'Account created successfully!',
-      token,
       user: formatUser(user),
     });
   } catch (error) {
@@ -56,9 +64,6 @@ const signup = async (req, res) => {
   }
 };
 
-// @route   POST /api/auth/login
-// @desc    Login user
-// @access  Public
 const login = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -68,8 +73,7 @@ const login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    // Find user and explicitly include password field
-    const user = await User.findOne({ email }).select('+password');
+    const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -77,8 +81,7 @@ const login = async (req, res) => {
       });
     }
 
-    // Check password
-    const isMatch = await user.comparePassword(password);
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({
         success: false,
@@ -86,12 +89,18 @@ const login = async (req, res) => {
       });
     }
 
-    const token = generateToken(user._id);
+    const token = generateToken(user.id);
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
 
     res.json({
       success: true,
       message: 'Login successful!',
-      token,
       user: formatUser(user),
     });
   } catch (error) {
@@ -100,30 +109,36 @@ const login = async (req, res) => {
   }
 };
 
-// @route   GET /api/auth/me
-// @desc    Get current logged-in user
-// @access  Private
+const logout = (req, res) => {
+  res.cookie('token', '', {
+    httpOnly: true,
+    expires: new Date(0)
+  });
+  res.json({ success: true, message: 'Logged out successfully' });
+};
+
 const getMe = async (req, res) => {
   res.json({ success: true, user: formatUser(req.user) });
 };
 
-// @route   PUT /api/auth/profile
-// @desc    Update user profile
-// @access  Private
 const updateProfile = async (req, res) => {
   const { name, currency, monthlyBudget } = req.body;
 
   try {
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { name, currency, monthlyBudget },
-      { new: true, runValidators: true }
-    );
+    const user = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { 
+        name, 
+        currency, 
+        monthlyBudget: monthlyBudget ? parseFloat(monthlyBudget) : 0 
+      },
+    });
 
     res.json({ success: true, user: formatUser(user) });
   } catch (error) {
+    console.error('Profile update error:', error);
     res.status(500).json({ success: false, message: 'Failed to update profile.' });
   }
 };
 
-module.exports = { signup, login, getMe, updateProfile };
+module.exports = { signup, login, logout, getMe, updateProfile };

@@ -28,14 +28,12 @@ export const TransactionProvider = ({ children }) => {
     }
   }, [filters]);
 
-  // Add new transaction and prepend to list
   const addTransaction = useCallback(async (transactionData) => {
     const { data } = await transactionsAPI.create(transactionData);
     setTransactions((prev) => [data.transaction, ...prev]);
     return data.transaction;
   }, []);
 
-  // Update existing transaction in-place
   const updateTransaction = useCallback(async (id, transactionData) => {
     const { data } = await transactionsAPI.update(id, transactionData);
     setTransactions((prev) =>
@@ -44,10 +42,39 @@ export const TransactionProvider = ({ children }) => {
     return data.transaction;
   }, []);
 
-  // Remove transaction from list
   const deleteTransaction = useCallback(async (id) => {
     await transactionsAPI.delete(id);
     setTransactions((prev) => prev.filter((t) => t._id !== id));
+  }, []);
+
+  const bulkDeleteTransactions = useCallback(async (ids) => {
+    await transactionsAPI.bulkDelete({ ids });
+    setTransactions((prev) => prev.filter((t) => !ids.includes(t._id)));
+  }, []);
+
+  const duplicateTransaction = useCallback(async (id) => {
+    const { data } = await transactionsAPI.duplicate(id);
+    setTransactions((prev) => [data.transaction, ...prev]);
+    toast.success("Transaction duplicated");
+  }, []);
+
+  const bulkImportTransactions = useCallback(async (file) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await transactionsAPI.bulkImport(formData);
+      toast.success("Transactions imported successfully");
+      fetchTransactions();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to import transactions');
+    }
+  }, [fetchTransactions]);
+  
+  const scanReceipt = useCallback(async (file) => {
+    const formData = new FormData();
+    formData.append('receipt', file);
+    const { data } = await transactionsAPI.scanReceipt(formData);
+    return data.data; // AI extracted data
   }, []);
 
   const updateFilters = useCallback((newFilters) => {
@@ -69,6 +96,10 @@ export const TransactionProvider = ({ children }) => {
         addTransaction,
         updateTransaction,
         deleteTransaction,
+        bulkDeleteTransactions,
+        duplicateTransaction,
+        bulkImportTransactions,
+        scanReceipt,
         updateFilters,
         clearFilters,
       }}

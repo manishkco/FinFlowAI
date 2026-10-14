@@ -1,7 +1,8 @@
+import { useRef } from 'react';
 import { useState, useEffect } from 'react';
 import {
   Plus, Search, Filter, Pencil, Trash2,
-  ArrowUpRight, ArrowDownRight, X, ChevronLeft, ChevronRight
+  ArrowUpRight, ArrowDownRight, X, ChevronLeft, ChevronRight, Upload, Copy
 } from 'lucide-react';
 import { useTransactions } from '../context/TransactionContext';
 import TransactionModal from '../components/Modals/TransactionModal';
@@ -14,7 +15,7 @@ const Transactions = () => {
   const {
     transactions, pagination, loading,
     filters, fetchTransactions,
-    addTransaction, updateTransaction, deleteTransaction,
+    addTransaction, updateTransaction, deleteTransaction, bulkDeleteTransactions, duplicateTransaction, bulkImportTransactions,
     updateFilters, clearFilters,
   } = useTransactions();
 
@@ -25,13 +26,58 @@ const Transactions = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const fileInputRef = useRef(null);
 
   const debouncedSearch = useDebounce(searchInput, 400);
 
   // Fetch when filters or page change
   useEffect(() => {
     fetchTransactions({ search: debouncedSearch, page });
+    setSelectedIds([]);
   }, [filters, debouncedSearch, page]);
+
+  const handleBulkImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await bulkImportTransactions(file);
+      e.target.value = '';
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} transactions?`)) {
+      setDeleteLoading(true);
+      try {
+        await bulkDeleteTransactions(selectedIds);
+        setSelectedIds([]);
+        toast.success("Transactions deleted");
+      } catch {
+        toast.error("Failed to delete transactions");
+      } finally {
+        setDeleteLoading(false);
+      }
+    }
+  };
+
+  const handleDuplicate = async (id) => {
+    await duplicateTransaction(id);
+  };
+
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      setSelectedIds(transactions.map(t => t._id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
 
   const handleAdd = async (data) => {
     await addTransaction(data);
@@ -80,14 +126,33 @@ const Transactions = () => {
             {pagination.total} total transaction{pagination.total !== 1 ? 's' : ''}
           </p>
         </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="btn-primary flex items-center gap-2 text-sm"
-        >
-          <Plus size={16} />
-          <span className="hidden sm:inline">Add Transaction</span>
-          <span className="sm:hidden">Add</span>
-        </button>
+        <div className="flex gap-2">
+          {selectedIds.length > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={deleteLoading}
+              className="px-3 py-2 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-xl text-sm font-medium hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+            >
+              Delete Selected ({selectedIds.length})
+            </button>
+          )}
+          <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleBulkImport} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+          >
+            <Upload size={16} />
+            <span className="hidden sm:inline">Import CSV</span>
+          </button>
+          <button
+            onClick={() => setModalOpen(true)}
+            className="btn-primary flex items-center gap-2 text-sm"
+          >
+            <Plus size={16} />
+            <span className="hidden sm:inline">Add Transaction</span>
+            <span className="sm:hidden">Add</span>
+          </button>
+        </div>
       </div>
 
       {/* Search + Filter bar */}
@@ -234,7 +299,10 @@ const Transactions = () => {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-slate-800">
-                    {['Date', 'Category', 'Description', 'Amount', 'Type', 'Actions'].map(h => (
+                    <th className="px-4 py-3 w-10">
+      <input type="checkbox" onChange={handleSelectAll} checked={transactions.length > 0 && selectedIds.length === transactions.length} className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500" />
+    </th>
+    {['Date', 'Category', 'Description', 'Amount', 'Type', 'Actions'].map(h => (
                       <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                         {h}
                       </th>
@@ -247,6 +315,9 @@ const Transactions = () => {
                       key={t._id}
                       className="border-b border-slate-50 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
                     >
+                      <td className="px-4 py-3.5">
+                        <input type="checkbox" checked={selectedIds.includes(t._id)} onChange={() => toggleSelect(t._id)} className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500" />
+                      </td>
                       <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                         {formatDate(t.date)}
                       </td>
@@ -283,6 +354,13 @@ const Transactions = () => {
                       </td>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => handleDuplicate(t._id)}
+                            className="p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all"
+                            title="Duplicate"
+                          >
+                            <Copy size={14} />
+                          </button>
                           <button
                             onClick={() => openEdit(t)}
                             className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all"

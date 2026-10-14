@@ -4,8 +4,10 @@ import {
   ResponsiveContainer, Cell, LineChart, Line, Legend
 } from 'recharts';
 import { useAnalytics } from '../hooks/useAnalytics';
-import { formatCurrency, getCategoryColor } from '../utils/helpers';
-import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { formatCurrency, formatCurrencyShort, getCategoryColor } from '../utils/helpers';
+import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Download, Sparkles } from 'lucide-react';
+import { transactionsAPI } from '../services/api';
+import toast from 'react-hot-toast';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -31,7 +33,8 @@ const Analytics = () => {
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const { summary, monthlyData, categories, loading } = useAnalytics(selectedMonth, selectedYear);
+  const { summary, monthlyData, categories, insights, loading, insightsLoading, generateInsights } = useAnalytics(selectedMonth, selectedYear);
+  const [downloading, setDownloading] = useState(false);
 
   const prevMonth = () => {
     if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear(y => y - 1); }
@@ -48,29 +51,101 @@ const Analytics = () => {
     net: d.income - d.expenses,
   }));
 
+  const downloadReport = async () => {
+    try {
+      setDownloading(true);
+      const res = await transactionsAPI.getAll({ limit: 10000 });
+      const transactions = res.data.transactions;
+      if (!transactions.length) return toast.error("No transactions to export");
+      
+      const headers = ["Date,Type,Category,Amount,Description"];
+      const csvData = transactions.map(t => 
+        `${new Date(t.date).toISOString().split('T')[0]},${t.type},${t.category},${t.amount},"${t.description || ''}"`
+      );
+      
+      const blob = new Blob([headers.concat(csvData).join("\n")], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `FinFlow_Report_${MONTHS[selectedMonth - 1]}_${selectedYear}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("Report downloaded");
+    } catch (error) {
+      toast.error("Failed to generate report");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="p-4 lg:p-8 max-w-7xl mx-auto">
-      {/* Header with month selector */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Analytics</h2>
           <p className="text-slate-400 text-sm mt-0.5">Deep dive into your finances</p>
         </div>
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
-          <button onClick={prevMonth} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors">
-            <ChevronLeft size={16} />
-          </button>
-          <span className="text-sm font-semibold text-slate-800 dark:text-white w-28 text-center">
-            {MONTHS[selectedMonth - 1]} {selectedYear}
-          </span>
-          <button
-            onClick={nextMonth}
-            disabled={isCurrentMonth}
-            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 transition-colors"
+        
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={downloadReport} 
+            disabled={downloading}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
           >
-            <ChevronRight size={16} />
+            <Download size={16} />
+            {downloading ? "Generating..." : "Export CSV"}
+          </button>
+          
+          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
+            <button onClick={prevMonth} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors">
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-sm font-semibold text-slate-800 dark:text-white w-28 text-center">
+              {MONTHS[selectedMonth - 1]} {selectedYear}
+            </span>
+            <button
+              onClick={nextMonth}
+              disabled={isCurrentMonth}
+              className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 transition-colors"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* AI Insights Card */}
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-5 mb-6 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="bg-indigo-100 dark:bg-indigo-800 p-2 rounded-lg text-indigo-600 dark:text-indigo-300">
+              <Sparkles size={20} />
+            </div>
+            <h3 className="font-bold text-slate-900 dark:text-white text-lg">AI Financial Insights</h3>
+          </div>
+          <button 
+            onClick={generateInsights}
+            disabled={insightsLoading || loading}
+            className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+          >
+            {insightsLoading ? 'Generating...' : 'Generate Insights'}
           </button>
         </div>
+        {insightsLoading ? (
+           <div className="space-y-2 mt-3">
+             <div className="h-4 bg-indigo-200/50 dark:bg-indigo-800/50 rounded animate-pulse w-3/4" />
+             <div className="h-4 bg-indigo-200/50 dark:bg-indigo-800/50 rounded animate-pulse w-2/3" />
+           </div>
+        ) : insights && insights.length > 0 ? (
+          <ul className="space-y-2 text-sm text-slate-700 dark:text-slate-300 list-disc pl-5 mt-3">
+            {insights.map((insight, idx) => <li key={idx} className="leading-relaxed">{insight}</li>)}
+          </ul>
+        ) : (
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+            Click the button above to generate personalized AI insights for this month.
+          </p>
+        )}
       </div>
 
       {/* Monthly summary cards */}
@@ -109,7 +184,7 @@ const Analytics = () => {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}
-                tickFormatter={v => `$${v >= 1000 ? (v/1000).toFixed(0)+'k' : v}`} width={45} />
+                tickFormatter={v => formatCurrencyShort(v)} width={45} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(148,163,184,0.08)' }} />
               <Bar dataKey="income" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={28} name="income" />
               <Bar dataKey="expenses" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={28} name="expenses" />
@@ -129,7 +204,6 @@ const Analytics = () => {
 
       {/* Category breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Category bar chart */}
         <div className="card">
           <h3 className="font-semibold text-slate-900 dark:text-white mb-1">Top Spending Categories</h3>
           <p className="text-xs text-slate-400 mb-5">
@@ -148,7 +222,7 @@ const Analytics = () => {
               >
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                 <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false}
-                  tickFormatter={v => `$${v >= 1000 ? (v/1000).toFixed(1)+'k' : v}`} />
+                  tickFormatter={v => formatCurrencyShort(v)} />
                 <YAxis type="category" dataKey="category" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} width={90} />
                 <Tooltip formatter={v => [formatCurrency(v), 'Spent']} contentStyle={{ borderRadius: '12px', fontSize: '12px', border: '1px solid #f1f5f9' }} />
                 <Bar dataKey="total" radius={[0, 6, 6, 0]} maxBarSize={20}>
@@ -161,7 +235,6 @@ const Analytics = () => {
           )}
         </div>
 
-        {/* Category list with progress bars */}
         <div className="card">
           <h3 className="font-semibold text-slate-900 dark:text-white mb-1">Expense Breakdown</h3>
           <p className="text-xs text-slate-400 mb-5">% of total monthly spend</p>

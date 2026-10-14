@@ -1,5 +1,47 @@
+# ── Dependencies ─────────────────────────────────────
 node_modules/
+
+# ── Environment Variables (NEVER commit these) ────────
 .env
+.env.local
+.env.*.local
+
+# ── Build Output ──────────────────────────────────────
 dist/
-.DS_Store
+build/
+.vite/
+
+# ── Prisma ────────────────────────────────────────────
+# Keep schema.prisma and migrations, ignore generated client
+backend/prisma/migrations/
+
+# ── Logs ──────────────────────────────────────────────
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── OS Files ──────────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── IDE / Editor ──────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ── Test / Dev Utility Scripts (local only) ───────────
+patch.js
+backend/testGemini.js
+backend/testGeminiImage.js
+
+# ── Personal Notes (local only) ───────────────────────
+Notes/
+
+# ── Coverage ──────────────────────────────────────────
+coverage/

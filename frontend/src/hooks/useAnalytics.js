@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
-import { analyticsAPI } from '../services/api';
+import { analyticsAPI, aiAPI } from '../services/api';
 
 export const useAnalytics = (month, year) => {
   const [summary, setSummary] = useState(null);
   const [monthlyData, setMonthlyData] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [insights, setInsights] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [insightsLoading, setInsightsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetch = useCallback(async () => {
+  const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -32,9 +34,32 @@ export const useAnalytics = (month, year) => {
     }
   }, [month, year]);
 
-  useEffect(() => {
-    fetch();
-  }, [fetch]);
+  const generateInsights = useCallback(async () => {
+    setInsightsLoading(true);
+    try {
+      const insightsRes = await aiAPI.getInsights().catch(e => ({ data: { insights: ['Failed to load insights.'] } }));
+      setInsights(insightsRes.data?.insights || []);
+    } catch (err) {
+      setInsights(['Failed to load insights.']);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, []);
 
-  return { summary, monthlyData, categories, loading, error, refetch: fetch };
+  useEffect(() => {
+    fetchAnalytics();
+    setInsights([]); // Reset insights when month/year changes
+  }, [fetchAnalytics]);
+
+  return { 
+    summary, 
+    monthlyData, 
+    categories, 
+    insights, 
+    loading, 
+    insightsLoading,
+    error, 
+    refetch: fetchAnalytics,
+    generateInsights 
+  };
 };

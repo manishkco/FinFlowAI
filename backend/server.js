@@ -1,15 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const connectDB = require('./config/db');
 
 // Load env vars
 dotenv.config();
 
-// Connect to database
-connectDB();
-
 const app = express();
+const cookieParser = require('cookie-parser');
+app.use(cookieParser());
 
 // Middleware
 const allowedOrigins = [
@@ -34,10 +32,38 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+const rateLimit = require('express-rate-limit');
+
+// General API Rate Limiter
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // Limit each IP to 200 requests per `window` (here, per 15 minutes)
+  message: { success: false, message: 'Too many requests from this IP, please try again after 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Stricter Rate Limiter for AI endpoints
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 50, // Limit each IP to 50 AI requests per hour
+  message: { success: false, message: 'AI request limit reached. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply general rate limit to all /api routes
+app.use('/api', apiLimiter);
+
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
+
+// Apply strict limit to scan-receipt specifically BEFORE the transaction routes handle it
+app.use('/api/transactions/scan-receipt', aiLimiter);
 app.use('/api/transactions', require('./routes/transactionRoutes'));
+
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
+app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // Stricter AI limits
 
 // Health check
 app.get('/api/health', (req, res) => {
